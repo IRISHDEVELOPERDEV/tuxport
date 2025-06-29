@@ -3,3 +3,4 @@
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 exec "$DIR/main.py" "$@"
+
