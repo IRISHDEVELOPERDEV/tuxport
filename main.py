@@ -13,6 +13,9 @@ import tempfile
 import re
 import shutil
 import sys
+import json
+
+__version__ = "1.0.0"
 
 # --- Modern TuxPort UI with all features ---
 print(f"TuxPort main.py is running from: {os.path.abspath(__file__)}", file=sys.stderr)
@@ -22,6 +25,65 @@ try:
     dnd_available = True
 except ImportError:
     dnd_available = False
+
+SETTINGS_FILE = os.path.expanduser("~/.tuxport_settings.json")
+
+def load_settings():
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, 'r') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"theme": "dark", "default_folder": os.path.expanduser("~"), "wine_path": "wine"}
+
+def save_settings(settings):
+    try:
+        with open(SETTINGS_FILE, 'w') as f:
+            json.dump(settings, f)
+    except Exception:
+        pass
+
+settings = load_settings()
+
+# Theme colors
+THEMES = {
+    "dark": {
+        "BG": "#23272e", "FG": "#e0e0e0", "ACCENT": "#4F8EF7", "LABEL": "#b0b0b0",
+        "ENTRY_BG": "#2d313a", "ENTRY_FG": "#e0e0e0"
+    },
+    "light": {
+        "BG": "#f5f5f5", "FG": "#23272e", "ACCENT": "#4F8EF7", "LABEL": "#444",
+        "ENTRY_BG": "#fff", "ENTRY_FG": "#23272e"
+    }
+}
+
+def apply_theme(theme):
+    global BG, FG, ACCENT, LABEL, ENTRY_BG, ENTRY_FG
+    t = THEMES[theme]
+    BG, FG, ACCENT, LABEL, ENTRY_BG, ENTRY_FG = t["BG"], t["FG"], t["ACCENT"], t["LABEL"], t["ENTRY_BG"], t["ENTRY_FG"]
+    # Update all widgets if root exists
+    if 'root' in globals():
+        update_all_widget_themes(root)
+
+def update_all_widget_themes(widget):
+    # Recursively update widget colors based on type
+    for child in widget.winfo_children():
+        cls = child.__class__.__name__
+        if cls in ("Frame", "Toplevel"):
+            child.configure(bg=BG)
+        elif cls == "Label":
+            child.configure(bg=BG, fg=FG)
+        elif cls == "Entry":
+            child.configure(bg=ENTRY_BG, fg=ENTRY_FG)
+        elif cls == "Button":
+            child.configure(bg=ACCENT, fg=FG)
+        elif cls == "Radiobutton":
+            child.configure(bg=BG, fg=FG, selectcolor=ACCENT)
+        # ttk widgets use style, so skip or update style globally
+        update_all_widget_themes(child)
+
+apply_theme(settings.get("theme", "dark"))
 
 def custom_file_explorer(initialdir=None):
     import pathlib
@@ -185,7 +247,7 @@ def prompt_install_wine():
 
 def show_about():
     about = tk.Toplevel(root)
-    about.title("About TuxPort")
+    about.title(f"About TuxPort v{__version__}")
     about.geometry("480x320")  # Larger size
     about.resizable(False, False)
     about.configure(bg=BG, bd=0, highlightthickness=0)
@@ -197,11 +259,11 @@ def show_about():
     x = max(0, x)
     about.geometry(f"+{x}+{y}")
     # Title label
-    tk.Label(about, text="TuxPort", font=("Segoe UI", 20, "bold"), bg=BG, fg=ACCENT, anchor='center', justify='center').pack(pady=(24, 8), fill='x')
+    tk.Label(about, text=f"TuxPort v{__version__}", font=("Segoe UI", 20, "bold"), bg=BG, fg=ACCENT, anchor='center', justify='center').pack(pady=(24, 8), fill='x')
     # Body text
     tk.Label(
         about,
-        text="TuxPort is open source software.\nIt uses Wine (also open source) to run Windows applications on Linux.\n\nGitHub: github.com/IRISHDEVELOPERDEV/tuxport\n\u00a9 2025 IRISHDEVELOPERDEV\nLicensed under the MIT License.",
+        text=f"TuxPort is open source software.\nIt uses Wine (also open source) to run Windows applications on Linux.\n\nGitHub: github.com/IRISHDEVELOPERDEV/tuxport\n\u00a9 2025 IRISHDEVELOPERDEV\nLicensed under the MIT License.",
         font=("Segoe UI", 13),
         bg=BG,
         fg=FG,
@@ -294,6 +356,56 @@ def download_and_run():
         if root.winfo_exists():
             file_label.config(text="Select and run a Windows installer (.exe) using Wine.")
 
+def show_settings():
+    s = settings.copy()
+    win = tk.Toplevel(root)
+    win.title("Settings")
+    win.geometry("")  # Let it autosize
+    win.resizable(False, False)
+    win.configure(bg=BG)
+    win.update_idletasks()
+    # Center the window on screen
+    x = root.winfo_x() + (root.winfo_width() // 2) - (win.winfo_reqwidth() // 2)
+    y = root.winfo_y() + (root.winfo_height() // 2) - (win.winfo_reqheight() // 2)
+    y = max(0, y)
+    x = max(0, x)
+    win.geometry(f"+{x}+{y}")
+    # Theme
+    tk.Label(win, text="Theme:", bg=BG, fg=FG, font=FONT_LABEL).pack(anchor='w', padx=20, pady=(20, 0))
+    theme_var = tk.StringVar(value=s.get("theme", "dark"))
+    theme_frame = tk.Frame(win, bg=BG)
+    theme_frame.pack(anchor='w', padx=20)
+    for t in THEMES:
+        tk.Radiobutton(theme_frame, text=t.title(), variable=theme_var, value=t, bg=BG, fg=FG, selectcolor=ACCENT, font=FONT_LABEL).pack(side='left', padx=8)
+    # Default folder
+    tk.Label(win, text="Default folder:", bg=BG, fg=FG, font=FONT_LABEL).pack(anchor='w', padx=20, pady=(16, 0))
+    folder_var = tk.StringVar(value=s.get("default_folder", os.path.expanduser("~")))
+    folder_entry = tk.Entry(win, textvariable=folder_var, bg=ENTRY_BG, fg=ENTRY_FG, font=FONT_LABEL, width=32)
+    folder_entry.pack(anchor='w', padx=20)
+    def browse_folder():
+        f = filedialog.askdirectory()
+        if f:
+            folder_var.set(f)
+    tk.Button(win, text="Browse", command=browse_folder, bg=ACCENT, fg=FG).pack(anchor='w', padx=20, pady=(2, 0))
+    # Wine path
+    tk.Label(win, text="Wine command/path:", bg=BG, fg=FG, font=FONT_LABEL).pack(anchor='w', padx=20, pady=(16, 0))
+    wine_var = tk.StringVar(value=s.get("wine_path", "wine"))
+    wine_entry = tk.Entry(win, textvariable=wine_var, bg=ENTRY_BG, fg=ENTRY_FG, font=FONT_LABEL, width=32)
+    wine_entry.pack(anchor='w', padx=20)
+    # Save button
+    def save_and_close():
+        s["theme"] = theme_var.get()
+        s["default_folder"] = folder_var.get()
+        s["wine_path"] = wine_var.get()
+        save_settings(s)
+        apply_theme(s["theme"])
+        win.destroy()
+        messagebox.showinfo("Settings", "Settings saved and theme applied.")
+    tk.Button(win, text="Save", command=save_and_close, bg=ACCENT, fg=FG).pack(pady=24)
+    win.transient(root)
+    win.grab_set()
+    root.wait_window(win)
+
 # Unified dark mode colors
 BG = "#23272e"
 FG = "#e0e0e0"
@@ -312,6 +424,16 @@ if dnd_available:
     root = TkinterDnD.Tk()
 else:
     root = tk.Tk()
+
+# Set window icon using the provided logo
+from tkinter import PhotoImage
+try:
+    logo_img = PhotoImage(file="Tux and Windows in Harmony.png")
+    root.iconphoto(True, logo_img)
+    print("[INFO] App icon loaded: Tux and Windows in Harmony.png", file=sys.stderr)
+except Exception as e:
+    print(f"[ERROR] Could not load logo: {e}", file=sys.stderr)
+
 root.title("TuxPort – Windows App Installer for Linux")
 root.configure(bg=BG)
 # Let window size itself to content, but set a minimum size to avoid being too small
@@ -346,10 +468,10 @@ desc = tk.Label(
     text="TuxPort is open source software.\nIt uses Wine (also open source) to run Windows applications on Linux.",
     font=FONT_DESC,
     bg=BG,
-    fg=LABEL,
-    justify="center",
+    fg=FG,
     wraplength=440,
-    anchor='center'
+    anchor='center',
+    justify='center'
 )
 desc.pack(pady=(0, 18), fill='x')
 
@@ -388,39 +510,27 @@ url_entry = ttk.Entry(url_frame, width=54, font=FONT_LABEL)
 url_entry.pack(fill='x', ipady=6)
 
 # Download button
+# --- Download and Run .exe button ---
 download_btn = ttk.Button(container, text="⬇️  Download and Run .exe", command=download_and_run, style='TButton')
 download_btn.pack(pady=18, fill="x")
 
-# Bottom buttons
-button_frame = ttk.Frame(container, style='TFrame')
-button_frame.pack(pady=18, fill='x')
-
-about_btn = ttk.Button(button_frame, text="About", command=show_about, style='TButton')
-about_btn.pack(side="left", expand=True, fill='x', padx=(0, 10))
-
-exit_btn = ttk.Button(button_frame, text="Exit", command=root.quit, style='TButton')
-exit_btn.pack(side="left", expand=True, fill='x', padx=(10, 0))
-
-# Make sure the button frame is visible and not cut off
-button_frame.update_idletasks()
-root.update_idletasks()
-
-if not is_wine_installed():
-    prompt_install_wine()
-
-# Add drag-and-drop support for .exe files
+# --- Drag-and-drop support ---
 def on_drop(event):
-    file_path = event.data.strip('{}')  # Remove curly braces if present
-    if file_path.lower().endswith('.exe'):
-        try:
-            subprocess.run(["wine", file_path], check=True)
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to run dropped file with Wine.\n{e}")
-    else:
-        messagebox.showerror("Invalid File", "Please drop a .exe file.")
+    files = event.data.strip().split()
+    for f in files:
+        if f.lower().endswith('.exe') and os.path.exists(f):
+            try:
+                subprocess.run([settings.get("wine_path", "wine"), f], check=True)
+                messagebox.showinfo("Success", f"Ran: {f}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to run {f}: {e}")
+        else:
+            messagebox.showerror("Invalid File", f"Please drop a valid .exe file. Got: {f}")
 
 if dnd_available:
     root.drop_target_register(DND_FILES)
     root.dnd_bind('<<Drop>>', on_drop)
+else:
+    messagebox.showinfo("Drag-and-Drop Unavailable", "Drag-and-drop support is not available. To enable it, install the 'tkinterdnd2' package.")
 
 root.mainloop()
